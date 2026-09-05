@@ -1,82 +1,189 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import DashboardHeader from './components/DashboardHeader';
+import FilterBar from './components/FilterBar';
+import SummaryCards from './components/SummaryCards';
+import OpportunityList from './components/OpportunityList';
+import OptimizationPanel from './components/OptimizationPanel';
+import ActionComparison from './components/ActionComparison';
+import DecisionTrace from './components/DecisionTrace';
+import AnalyticsCharts from './components/AnalyticsCharts';
+import {
+  fetchArenas,
+  fetchSports,
+  fetchSummary,
+  fetchOpportunities,
+  fetchAnalytics,
+  fetchSportBreakdown,
+  optimizeSlot
+} from './services/api';
 import './App.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
-
 function App() {
-  const [backendStatus, setBackendStatus] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  // Filter States
+  const [arenas, setArenas] = useState([]);
+  const [sports, setSports] = useState([]);
+  const [selectedArena, setSelectedArena] = useState('');
+  const [selectedSport, setSelectedSport] = useState('');
 
-  const checkBackendHealth = async () => {
-    setLoading(true);
-    setError(null);
-    setBackendStatus(null);
+  // Data States
+  const [summaryData, setSummaryData] = useState(null);
+  const [opportunities, setOpportunities] = useState([]);
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [sportBreakdown, setSportBreakdown] = useState([]);
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/health`);
-      if (!response.ok) {
-        throw new Error(`Server returned status: ${response.status}`);
+  // Optimization States
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [optimizationResult, setOptimizationResult] = useState(null);
+
+  // Loading & Error States
+  const [loadingFilters, setLoadingFilters] = useState(true);
+  const [loadingData, setLoadingData] = useState(false);
+  const [analyzingSlot, setAnalyzingSlot] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
+
+  // Initial Filter Load
+  useEffect(() => {
+    async function loadInitialFilters() {
+      setLoadingFilters(true);
+      try {
+        const [arenaList, sportList] = await Promise.all([
+          fetchArenas(),
+          fetchSports()
+        ]);
+        setArenas(arenaList);
+        setSports(sportList);
+      } catch (err) {
+        console.error('Failed to load filter metadata:', err);
+        setErrorMessage('Failed to load initial metadata.');
+      } finally {
+        setLoadingFilters(false);
       }
-      const data = await response.json();
-      setBackendStatus(data);
+    }
+    loadInitialFilters();
+  }, []);
+
+  // Main Data Load whenever filters change
+  useEffect(() => {
+    async function loadDashboardData() {
+      setLoadingData(true);
+      setErrorMessage(null);
+      try {
+        const [summary, opps, analytics, breakdown] = await Promise.all([
+          fetchSummary(selectedArena, selectedSport),
+          fetchOpportunities(selectedArena, selectedSport),
+          fetchAnalytics(selectedArena, selectedSport),
+          fetchSportBreakdown(selectedArena)
+        ]);
+
+        setSummaryData(summary);
+        setOpportunities(opps);
+        setAnalyticsData(analytics);
+        setSportBreakdown(breakdown);
+
+        // Auto-select first opportunity if none selected or current selection missing
+        if (opps && opps.length > 0 && !selectedSlot) {
+          handleSelectOpportunity(opps[0]);
+        }
+      } catch (err) {
+        console.error('Failed to load dashboard data:', err);
+        setErrorMessage('Error fetching analytics & opportunities data.');
+      } finally {
+        setLoadingData(false);
+      }
+    }
+    loadDashboardData();
+  }, [selectedArena, selectedSport]);
+
+  // Handle Opportunity Selection & Run AI Agent Optimization
+  const handleSelectOpportunity = async (opp) => {
+    setSelectedSlot(opp);
+    setAnalyzingSlot(true);
+    setOptimizationResult(null);
+    try {
+      const result = await optimizeSlot(opp.slot_id);
+      setOptimizationResult(result);
     } catch (err) {
-      setError(err.message || 'Failed to connect to backend');
+      console.error('Failed to optimize slot:', err);
+      setErrorMessage('AI Agent failed to analyze the selected slot.');
     } finally {
-      setLoading(false);
+      setAnalyzingSlot(false);
     }
   };
 
   return (
-    <main className="app-container">
-      <section className="hero-card">
-        <div className="logo-badge">
-          <span>⚽ Turf Analytics</span>
+    <div className="app-container dark-theme">
+      <div className="content-wrapper">
+        <DashboardHeader />
+
+        <FilterBar
+          arenas={arenas}
+          sports={sports}
+          selectedArena={selectedArena}
+          selectedSport={selectedSport}
+          onArenaChange={setSelectedArena}
+          onSportChange={setSelectedSport}
+        />
+
+        {errorMessage && (
+          <div className="error-banner">
+            <span>⚠️ {errorMessage}</span>
+            <button onClick={() => setErrorMessage(null)}>Dismiss</button>
+          </div>
+        )}
+
+        {/* Top Summary KPI Cards */}
+        <SummaryCards summaryData={summaryData} loading={loadingData} />
+
+        {/* Main Grid: Left = Underutilized Opportunities, Right = AI Profit Agent */}
+        <div className="dashboard-grid">
+          <section className="left-panel">
+            <OpportunityList
+              opportunities={opportunities}
+              selectedSlotId={selectedSlot?.slot_id}
+              onSelectOpportunity={handleSelectOpportunity}
+              loading={loadingData}
+            />
+          </section>
+
+          <section className="right-panel">
+            <OptimizationPanel
+              slot={selectedSlot}
+              optimizationResult={optimizationResult}
+              loading={analyzingSlot}
+            />
+
+            {optimizationResult && (
+              <>
+                <ActionComparison
+                  actions={optimizationResult.action_evaluations}
+                  recommendedAction={optimizationResult.recommended_action}
+                />
+                <DecisionTrace
+                  trace={optimizationResult.agent_trace}
+                />
+              </>
+            )}
+          </section>
         </div>
 
-        <h1 className="title">SPORTS TURF PROFIT OPTIMIZER</h1>
-        <p className="subtitle">AI-powered off-peak turf utilization and profit optimization</p>
+        {/* Bottom Section: Analytics & Occupancy Charts */}
+        <section className="analytics-section">
+          <h2 className="section-title">
+            <span>📊</span> Analytics & Utilization Insights
+          </h2>
+          <AnalyticsCharts
+            analyticsData={analyticsData}
+            sportBreakdown={sportBreakdown}
+          />
+        </section>
 
-        <div className="stage-card">
-          <span className="stage-label">Current Stage</span>
-          <span className="stage-value">
-            <span className="stage-pulse"></span>
-            Project initialization
-          </span>
-        </div>
-
-        <div className="action-section">
-          <button
-            id="btn-check-backend"
-            className="btn-check-backend"
-            onClick={checkBackendHealth}
-            disabled={loading}
-          >
-            {loading ? 'Checking...' : 'Check Backend'}
-          </button>
-
-          {backendStatus && (
-            <div className="status-result success">
-              <div className="result-header">
-                <span>Status: {backendStatus.status}</span>
-                <span>✅ Connected</span>
-              </div>
-              <p className="result-message">{backendStatus.message}</p>
-            </div>
-          )}
-
-          {error && (
-            <div className="status-result error">
-              <div className="result-header">
-                <span>Connection Error</span>
-                <span>❌ Failed</span>
-              </div>
-              <p className="result-message">{error}</p>
-            </div>
-          )}
-        </div>
-      </section>
-    </main>
+        <footer className="dashboard-footer">
+          <p>
+            ⚡ <strong>Sports Turf Profit Optimizer</strong> &bull; AI Agent Decision System &bull; Active Provider: Demo Provider
+          </p>
+        </footer>
+      </div>
+    </div>
   );
 }
 
