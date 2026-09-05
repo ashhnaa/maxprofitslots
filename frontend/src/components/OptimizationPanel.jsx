@@ -37,14 +37,42 @@ export default function OptimizationPanel({ slot, optimizationResult, loading })
     );
   }
 
-  const isDoNothing = optimizationResult?.recommended_action === 'DO_NOTHING';
-  const histFill = (parseFloat(optimizationResult?.historical_fill_rate || slot?.historical_fill_rate || 0) * 100).toFixed(1);
-  const mlProb = (parseFloat(optimizationResult?.natural_booking_probability || 0) * 100).toFixed(1);
-  const recAction = optimizationResult?.recommended_action || 'DO_NOTHING';
-  const expProfit = optimizationResult?.expected_profit || 0;
-  const expRevenue = optimizationResult?.expected_revenue || 0;
-  const actionCost = optimizationResult?.action_cost || 0;
+  // Handle both camelCase and snake_case backend payloads
+  const recAction = optimizationResult?.recommendedAction || optimizationResult?.recommended_action || 'DO_NOTHING';
+  const isDoNothing = recAction === 'DO_NOTHING';
+
+  // Format Historical Fill Rate
+  let histFill = '0.0';
+  if (optimizationResult?.historicalFillRate !== undefined) {
+    const v = parseFloat(optimizationResult.historicalFillRate);
+    histFill = v <= 1.0 && v > 0 ? (v * 100).toFixed(1) : v.toFixed(1);
+  } else if (slot?.historicalFillRate !== undefined || slot?.historical_fill_rate !== undefined) {
+    const v = parseFloat(slot.historicalFillRate || slot.historical_fill_rate);
+    histFill = v <= 1.0 && v > 0 ? (v * 100).toFixed(1) : v.toFixed(1);
+  }
+
+  // Format ML Probability
+  let mlProb = '0.0';
+  if (optimizationResult?.bookingProbability !== undefined) {
+    const v = parseFloat(optimizationResult.bookingProbability);
+    mlProb = v <= 1.0 ? (v * 100).toFixed(1) : v.toFixed(1);
+  } else if (optimizationResult?.natural_booking_probability !== undefined) {
+    const v = parseFloat(optimizationResult.natural_booking_probability);
+    mlProb = v <= 1.0 ? (v * 100).toFixed(1) : v.toFixed(1);
+  }
+
+  const expProfit = optimizationResult?.expectedProfit !== undefined 
+    ? optimizationResult.expectedProfit 
+    : (optimizationResult?.expected_profit || 0);
+
   const reason = optimizationResult?.reason || 'Calculated optimal expected profit under arena policy rules.';
+
+  // Slot Metadata
+  const slotObj = optimizationResult?.slot || slot;
+  const slotId = slotObj?.id || slotObj?.slot_id || slot?.slot_id || '—';
+  const arenaName = slotObj?.arenaName || slotObj?.arena_name || (slotObj?.arenaId ? `Arena #${slotObj.arenaId}` : (slotObj?.arena_id ? `Arena #${slotObj.arena_id}` : 'Arena'));
+  const sportName = slotObj?.sport || slotObj?.sport_type || 'Football';
+  const basePrice = slotObj?.normalPrice || slotObj?.normal_price || slotObj?.base_price || 1200;
 
   return (
     <div className="glass-card optimization-card">
@@ -54,8 +82,8 @@ export default function OptimizationPanel({ slot, optimizationResult, loading })
       </div>
 
       <div className="slot-context-banner">
-        <span>Slot #{slot?.slot_id || '—'} &bull; {slot?.arena_name || `Arena #${slot?.arena_id}`} &bull; {slot?.sport_type || 'Football'}</span>
-        <span className="opp-badge">Base Price: {formatCurrency(slot?.base_price || 1200)}</span>
+        <span>Slot #{slotId} &bull; {arenaName} &bull; {sportName}</span>
+        <span className="opp-badge">Base Price: {formatCurrency(basePrice)}</span>
       </div>
 
       <div className={`ai-recommendation-box ${isDoNothing ? 'do-nothing' : ''}`}>

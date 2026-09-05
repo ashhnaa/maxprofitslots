@@ -64,8 +64,10 @@ export default function OpportunityList({
         {opportunities.map((opp, idx) => {
           const resolvedSlotId = opp.slot_id || opp.slotId || opp.id || (idx + 1);
           const isSelected = selectedSlotId === resolvedSlotId;
-          const fillRatePct = Math.round(parseFloat(opp.historical_fill_rate || opp.historicalFillRate || 0) * 100);
-          const score = (parseFloat(opp.opportunity_score || opp.opportunityScore || 0) * 100).toFixed(0);
+          const rawFill = parseFloat(opp.historical_fill_rate !== undefined ? opp.historical_fill_rate : (opp.historicalFillRate !== undefined ? opp.historicalFillRate : 0));
+          const fillRatePct = rawFill <= 1.0 && rawFill > 0 ? (rawFill * 100).toFixed(1) : rawFill.toFixed(1);
+          const rawScore = parseFloat(opp.opportunity_score !== undefined ? opp.opportunity_score : (opp.opportunityScore !== undefined ? opp.opportunityScore : 0));
+          const score = rawScore <= 1.0 && rawScore > 0 ? (rawScore * 100).toFixed(0) : rawScore.toFixed(0);
           const dayName = opp.day_of_week !== undefined 
             ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][opp.day_of_week] 
             : (opp.dayOfWeek || 'Off-Peak');

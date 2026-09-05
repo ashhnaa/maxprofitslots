@@ -2,7 +2,7 @@ import React from 'react';
 import { Check, ShieldAlert, Award } from 'lucide-react';
 
 function formatCurrency(val) {
-  if (val === undefined || val === null || val < 0) return '—';
+  if (val === undefined || val === null || isNaN(val) || val < -900000) return '—';
   return `₹${Number(val).toLocaleString('en-IN')}`;
 }
 
@@ -35,12 +35,19 @@ export default function ActionComparison({ actions, recommendedAction }) {
           </thead>
           <tbody>
             {actions.map((act, idx) => {
-              const actionName = act.action_name || act.action || `Action ${idx}`;
-              const isRecommended = actionName === recommendedAction && (act.is_valid !== false);
-              const isValid = act.is_valid !== false;
-              const probPct = isValid && act.booking_probability !== undefined 
-                ? `${(parseFloat(act.booking_probability) * 100).toFixed(1)}%` 
-                : '—';
+              const actionName = act.action || act.action_name || `Action ${idx}`;
+              const isValid = act.isValid !== undefined ? act.isValid : (act.is_valid !== false);
+              const isRecommended = actionName === recommendedAction && isValid;
+
+              const rawProb = act.bookingProbability !== undefined ? act.bookingProbability : act.booking_probability;
+              const probPct = isValid && rawProb !== undefined ? `${(parseFloat(rawProb) * 100).toFixed(1)}%` : '—';
+
+              const discountPct = act.discountPercentage !== undefined ? act.discountPercentage : (act.discount_pct || act.discount_percentage || 0);
+              const finalPrice = act.finalPrice !== undefined ? act.finalPrice : (act.final_price || 0);
+              const expRevenue = act.expectedRevenue !== undefined ? act.expectedRevenue : (act.expected_revenue || 0);
+              const actionCost = act.actionCost !== undefined ? act.actionCost : (act.action_cost || 0);
+              const expProfit = act.expectedProfit !== undefined ? act.expectedProfit : (act.expected_profit || 0);
+              const invalidReason = act.invalidationReason || act.invalidation_reason || 'Prohibited by Policy';
 
               return (
                 <tr
@@ -48,7 +55,7 @@ export default function ActionComparison({ actions, recommendedAction }) {
                   className={isRecommended ? 'recommended-row' : ''}
                 >
                   <td>
-                    <strong>{actionName}</strong>
+                    <strong>{act.label || actionName}</strong>
                   </td>
 
                   <td>
@@ -61,26 +68,26 @@ export default function ActionComparison({ actions, recommendedAction }) {
                         Valid
                       </span>
                     ) : (
-                      <span className="opp-badge" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}>
+                      <span className="opp-badge" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }} title={invalidReason}>
                         <ShieldAlert size={12} inline="true" /> Prohibited
                       </span>
                     )}
                   </td>
 
                   <td>{probPct}</td>
-                  <td>{act.discount_pct || act.discount_percentage || 0}%</td>
-                  <td>{formatCurrency(act.final_price || act.finalPrice)}</td>
-                  <td>{formatCurrency(act.expected_revenue || act.expectedRevenue)}</td>
-                  <td>{formatCurrency(act.action_cost || act.actionCost)}</td>
+                  <td>{discountPct}%</td>
+                  <td>{formatCurrency(finalPrice)}</td>
+                  <td>{formatCurrency(expRevenue)}</td>
+                  <td>{formatCurrency(actionCost)}</td>
 
                   <td>
                     {isValid ? (
                       <strong className={isRecommended ? 'text-emerald' : ''}>
-                        {formatCurrency(act.expected_profit || act.expectedProfit)}
+                        {formatCurrency(expProfit)}
                       </strong>
                     ) : (
-                      <span className="text-muted" title={act.invalidation_reason}>
-                        Invalid ({act.invalidation_reason || 'Disallowed'})
+                      <span className="text-muted" title={invalidReason} style={{ fontSize: '0.75rem' }}>
+                        {invalidReason.length > 40 ? `${invalidReason.substring(0, 40)}...` : invalidReason}
                       </span>
                     )}
                   </td>
