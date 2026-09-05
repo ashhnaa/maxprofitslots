@@ -102,6 +102,42 @@ function buildWhere(conditions) {
   };
 }
 
+// Helper: build slot filter clauses for SQL queries
+function buildSlotFilters(filters, alias = 's') {
+  const clauses = [];
+  const values = [];
+  let idx = 1;
+  const prefix = alias ? `${alias}.` : '';
+
+  if (filters.arenaId) {
+    clauses.push(`${prefix}arena_id = $${idx++}`);
+    values.push(parseInt(filters.arenaId, 10));
+  }
+  if (filters.sport) {
+    clauses.push(`${prefix}sport = $${idx++}`);
+    values.push(filters.sport);
+  }
+  if (filters.period) {
+    clauses.push(`${prefix}period = $${idx++}`);
+    values.push(filters.period.toUpperCase());
+  }
+  if (filters.startDate || filters.fromDate) {
+    clauses.push(`${prefix}date >= $${idx++}`);
+    values.push(filters.startDate || filters.fromDate);
+  }
+  if (filters.endDate || filters.toDate) {
+    clauses.push(`${prefix}date <= $${idx++}`);
+    values.push(filters.endDate || filters.toDate);
+  }
+
+  return {
+    where: clauses.length ? 'WHERE ' + clauses.join(' AND ') : '',
+    andWhere: clauses.length ? 'AND ' + clauses.join(' AND ') : '',
+    values,
+    nextIdx: idx
+  };
+}
+
 // ---------------------------------------------------------------
 // DemoBookingProvider
 // ---------------------------------------------------------------
@@ -277,89 +313,397 @@ class DemoBookingProvider extends BookingProvider {
   // ------------------------------------------------------------------
 
   async getBookingStatistics(filters = {}) {
-    const clauses = [];
-    const values  = [];
-    let   idx     = 1;
+    return this.getAnalyticsSummary(filters);
+  }
 
-    if (filters.arenaId)  { clauses.push(`arena_id = $${idx++}`); values.push(parseInt(filters.arenaId, 10)); }
-    if (filters.fromDate) { clauses.push(`date >= $${idx++}`);    values.push(filters.fromDate); }
-    if (filters.toDate)   { clauses.push(`date <= $${idx++}`);    values.push(filters.toDate); }
+  // ------------------------------------------------------------------
+  // Off-Peak Analytics Methods
+  // ------------------------------------------------------------------
 
-    const slotWhere = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
+  /**
+   * High-level analytics summary for dashboard consumption.
+   */
+  async getAnalyticsSummary(filters = {}) {
+    const { where, values } = buildSlotFilters(filters, 's');
 
-    // Slot counts
-    const slotStats = await db.query(`
+    // Aggregate slots data
+    const slotQuery = `
       SELECT
-        COUNT(*)                                   AS total_slots,
-        COUNT(*) FILTER (WHERE status = 'BOOKED')  AS booked_slots,
-        COUNT(*) FILTER (WHERE status = 'AVAILABLE') AS available_slots,
-        COUNT(*) FILTER (WHERE period = 'PEAK' AND status = 'BOOKED')    AS peak_booked,
-        COUNT(*) FILTER (WHERE period = 'PEAK')                          AS peak_total,
-        COUNT(*) FILTER (WHERE period = 'NON_PEAK' AND status = 'BOOKED') AS nonpeak_booked,
-        COUNT(*) FILTER (WHERE period = 'NON_PEAK')                      AS nonpeak_total
-      FROM slots
-      ${slotWhere}
-    `, values);
+        COUNT(s.id)                                           AS total_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')        AS booked_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'AVAILABLE')     AS available_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'BLOCKED')       AS blocked_slots,
+        COUNT(s.id) FILTER (WHERE s.period = 'PEAK')          AS peak_total,
+        COUNT(s.id) FILTER (WHERE s.period = 'PEAK' AND s.status = 'BOOKED')     AS peak_booked,
+        COUNT(s.id) FILTER (WHERE s.period = 'NON_PEAK')      AS nonpeak_total,
+        COUNT(s.id) FILTER (WHERE s.period = 'NON_PEAK' AND s.status = 'BOOKED') AS nonpeak_booked
+      FROM slots s
+      ${where}
+    `;
+    const slotRes = await db.query(slotQuery, values);
+    const sr = slotRes.rows[0];
 
-    // Booking financial stats (only COMPLETED / CONFIRMED)
-    const bookingWhere = clauses.length
-      ? `WHERE s.${clauses.join(' AND s.').replace(/\$(\d+)/g, (_, n) => `$${n}`)}`
-      : '';
-
-    const bookingStats = await db.query(`
+    // Aggregate bookings financial data
+    const bookingQuery = `
       SELECT
-        COUNT(b.id)                                       AS total_bookings,
-        COUNT(b.id) FILTER (WHERE b.status = 'CANCELLED') AS cancelled,
-        COALESCE(SUM(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS total_revenue,
-        COALESCE(AVG(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS avg_booking_value
+        COUNT(b.id)                                                AS total_bookings,
+        COUNT(b.id) FILTER (WHERE b.status = 'CANCELLED')          AS cancelled_bookings,
+        COUNT(b.id) FILTER (WHERE b.status != 'CANCELLED')         AS completed_bookings,
+        COALESCE(SUM(b.original_price) FILTER (WHERE b.status != 'CANCELLED'), 0)  AS revenue_before_discount,
+        COALESCE(SUM(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0)     AS total_revenue,
+        COALESCE(AVG(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0)     AS avg_booking_value,
+        COALESCE(AVG(b.discount_percentage) FILTER (WHERE b.status != 'CANCELLED'), 0) AS avg_discount_pct
       FROM bookings b
       JOIN slots s ON s.id = b.slot_id
-      ${bookingWhere}
-    `, values);
+      ${where}
+    `;
+    const bookingRes = await db.query(bookingQuery, values);
+    const br = bookingRes.rows[0];
 
-    // Per-sport stats
-    const sportStats = await db.query(`
-      SELECT
-        s.sport,
-        COUNT(s.id)                                       AS total_slots,
-        COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')   AS booked_slots
-      FROM slots s
-      ${slotWhere}
-      GROUP BY s.sport
-      ORDER BY s.sport
-    `, values);
+    const totalSlots     = parseInt(sr.total_slots, 10) || 0;
+    const bookedSlots    = parseInt(sr.booked_slots, 10) || 0;
+    const availableSlots = parseInt(sr.available_slots, 10) || 0;
+    const blockedSlots   = parseInt(sr.blocked_slots, 10) || 0;
 
-    const sr  = slotStats.rows[0];
-    const br  = bookingStats.rows[0];
-    const total    = parseInt(sr.total_slots, 10)    || 0;
-    const booked   = parseInt(sr.booked_slots, 10)   || 0;
-    const peakT    = parseInt(sr.peak_total, 10)     || 0;
-    const peakB    = parseInt(sr.peak_booked, 10)    || 0;
-    const npT      = parseInt(sr.nonpeak_total, 10)  || 0;
-    const npB      = parseInt(sr.nonpeak_booked, 10) || 0;
-    const totalB   = parseInt(br.total_bookings, 10) || 0;
-    const cancelled= parseInt(br.cancelled, 10)      || 0;
+    const peakTotal    = parseInt(sr.peak_total, 10) || 0;
+    const peakBooked   = parseInt(sr.peak_booked, 10) || 0;
+    const nonPeakTotal  = parseInt(sr.nonpeak_total, 10) || 0;
+    const nonPeakBooked = parseInt(sr.nonpeak_booked, 10) || 0;
+
+    const totalBookings     = parseInt(br.total_bookings, 10) || 0;
+    const cancelledBookings = parseInt(br.cancelled_bookings, 10) || 0;
+
+    const revenueBeforeDiscount = parseFloat(parseFloat(br.revenue_before_discount).toFixed(2));
+    const totalRevenue          = parseFloat(parseFloat(br.total_revenue).toFixed(2));
+    const totalDiscountAmount   = parseFloat((revenueBeforeDiscount - totalRevenue).toFixed(2));
+    const avgBookingValue       = parseFloat(parseFloat(br.avg_booking_value).toFixed(2));
+    const avgDiscountPct        = parseFloat(parseFloat(br.avg_discount_pct).toFixed(2));
+
+    const fillRate        = totalSlots ? parseFloat(((bookedSlots / totalSlots) * 100).toFixed(2)) : 0;
+    const peakFillRate    = peakTotal ? parseFloat(((peakBooked / peakTotal) * 100).toFixed(2)) : 0;
+    const nonPeakFillRate = nonPeakTotal ? parseFloat(((nonPeakBooked / nonPeakTotal) * 100).toFixed(2)) : 0;
+    const cancellationRate= totalBookings ? parseFloat(((cancelledBookings / totalBookings) * 100).toFixed(2)) : 0;
 
     return {
-      totalSlots:       total,
-      bookedSlots:      booked,
-      availableSlots:   parseInt(sr.available_slots, 10) || 0,
-      fillRate:         total ? parseFloat(((booked / total) * 100).toFixed(2)) : 0,
-      peakFillRate:     peakT  ? parseFloat(((peakB  / peakT)  * 100).toFixed(2)) : 0,
-      nonPeakFillRate:  npT    ? parseFloat(((npB    / npT)    * 100).toFixed(2)) : 0,
-      totalBookings:    totalB,
-      totalRevenue:     parseFloat(parseFloat(br.total_revenue).toFixed(2)),
-      avgBookingValue:  parseFloat(parseFloat(br.avg_booking_value).toFixed(2)),
-      cancellationRate: totalB ? parseFloat(((cancelled / totalB) * 100).toFixed(2)) : 0,
-      bySport: sportStats.rows.map(row => ({
-        sport:       row.sport,
-        totalSlots:  parseInt(row.total_slots,  10),
-        bookedSlots: parseInt(row.booked_slots, 10),
-        fillRate:    parseInt(row.total_slots, 10)
-          ? parseFloat(((parseInt(row.booked_slots, 10) / parseInt(row.total_slots, 10)) * 100).toFixed(2))
-          : 0,
-      })),
+      totalSlots,
+      bookedSlots,
+      availableSlots,
+      blockedSlots,
+      fillRate,
+      peakFillRate,
+      nonPeakFillRate,
+      totalBookings,
+      cancelledBookings,
+      cancellationRate,
+      revenueBeforeDiscount,
+      totalRevenue,
+      totalDiscountAmount,
+      avgDiscountPercentage: avgDiscountPct,
+      avgBookingValue,
     };
+  }
+
+  /**
+   * Utilization details broke down by period and general metrics.
+   */
+  async getUtilizationAnalytics(filters = {}) {
+    const summary = await this.getAnalyticsSummary(filters);
+    const { where, values } = buildSlotFilters(filters, 's');
+
+    const sql = `
+      SELECT
+        s.period,
+        COUNT(s.id)                                           AS total_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')        AS booked_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'AVAILABLE')     AS available_slots,
+        ROUND(COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id), 0) * 100, 2) AS fill_rate
+      FROM slots s
+      ${where}
+      GROUP BY s.period
+      ORDER BY s.period
+    `;
+    const res = await db.query(sql, values);
+
+    return {
+      summary: {
+        totalSlots: summary.totalSlots,
+        bookedSlots: summary.bookedSlots,
+        availableSlots: summary.availableSlots,
+        overallFillRate: summary.fillRate,
+        peakFillRate: summary.peakFillRate,
+        nonPeakFillRate: summary.nonPeakFillRate,
+      },
+      byPeriod: res.rows.map(row => ({
+        period: row.period,
+        totalSlots: parseInt(row.total_slots, 10),
+        bookedSlots: parseInt(row.booked_slots, 10),
+        availableSlots: parseInt(row.available_slots, 10),
+        fillRate: parseFloat(row.fill_rate || 0),
+      }))
+    };
+  }
+
+  /**
+   * Performance metrics aggregated by sport.
+   */
+  async getSportAnalytics(filters = {}) {
+    const { where, values } = buildSlotFilters(filters, 's');
+
+    const sql = `
+      SELECT
+        s.sport,
+        COUNT(s.id)                                                          AS total_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')                       AS booked_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'AVAILABLE')                    AS available_slots,
+        ROUND(COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id), 0) * 100, 2) AS fill_rate,
+        ROUND(COUNT(s.id) FILTER (WHERE s.period = 'PEAK' AND s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id) FILTER (WHERE s.period = 'PEAK'), 0) * 100, 2) AS peak_fill_rate,
+        ROUND(COUNT(s.id) FILTER (WHERE s.period = 'NON_PEAK' AND s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id) FILTER (WHERE s.period = 'NON_PEAK'), 0) * 100, 2) AS non_peak_fill_rate,
+        COALESCE(SUM(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS total_revenue,
+        COALESCE(AVG(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS avg_booking_value,
+        COUNT(b.id)                                                          AS total_bookings,
+        COUNT(b.id) FILTER (WHERE b.status = 'CANCELLED')                    AS cancelled_bookings,
+        ROUND(COUNT(b.id) FILTER (WHERE b.status = 'CANCELLED')::numeric / NULLIF(COUNT(b.id), 0) * 100, 2) AS cancellation_rate
+      FROM slots s
+      LEFT JOIN bookings b ON b.slot_id = s.id
+      ${where}
+      GROUP BY s.sport
+      ORDER BY s.sport
+    `;
+
+    const res = await db.query(sql, values);
+    return res.rows.map(row => ({
+      sport:              row.sport,
+      totalSlots:         parseInt(row.total_slots, 10),
+      bookedSlots:        parseInt(row.booked_slots, 10),
+      availableSlots:     parseInt(row.available_slots, 10),
+      fillRate:           parseFloat(row.fill_rate || 0),
+      peakFillRate:       parseFloat(row.peak_fill_rate || 0),
+      nonPeakFillRate:    parseFloat(row.non_peak_fill_rate || 0),
+      totalRevenue:       parseFloat(parseFloat(row.total_revenue).toFixed(2)),
+      avgBookingValue:    parseFloat(parseFloat(row.avg_booking_value).toFixed(2)),
+      totalBookings:      parseInt(row.total_bookings, 10),
+      cancelledBookings:  parseInt(row.cancelled_bookings, 10),
+      cancellationRate:   parseFloat(row.cancellation_rate || 0),
+    }));
+  }
+
+  /**
+   * Performance metrics aggregated by arena.
+   */
+  async getArenaAnalytics(filters = {}) {
+    const { where, values } = buildSlotFilters(filters, 's');
+
+    const sql = `
+      SELECT
+        a.id                                                                 AS arena_id,
+        a.name                                                               AS arena_name,
+        COUNT(s.id)                                                          AS total_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')                       AS booked_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'AVAILABLE')                    AS available_slots,
+        ROUND(COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id), 0) * 100, 2) AS fill_rate,
+        ROUND(COUNT(s.id) FILTER (WHERE s.period = 'PEAK' AND s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id) FILTER (WHERE s.period = 'PEAK'), 0) * 100, 2) AS peak_fill_rate,
+        ROUND(COUNT(s.id) FILTER (WHERE s.period = 'NON_PEAK' AND s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id) FILTER (WHERE s.period = 'NON_PEAK'), 0) * 100, 2) AS non_peak_fill_rate,
+        COALESCE(SUM(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS total_revenue,
+        COALESCE(AVG(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS avg_booking_value,
+        COUNT(b.id)                                                          AS total_bookings,
+        COUNT(b.id) FILTER (WHERE b.status = 'CANCELLED')                    AS cancelled_bookings,
+        ROUND(COUNT(b.id) FILTER (WHERE b.status = 'CANCELLED')::numeric / NULLIF(COUNT(b.id), 0) * 100, 2) AS cancellation_rate
+      FROM arenas a
+      JOIN slots s ON s.arena_id = a.id
+      LEFT JOIN bookings b ON b.slot_id = s.id
+      ${where}
+      GROUP BY a.id, a.name
+      ORDER BY a.id
+    `;
+
+    const res = await db.query(sql, values);
+    return res.rows.map(row => ({
+      arenaId:            row.arena_id,
+      arenaName:          row.arena_name,
+      totalSlots:         parseInt(row.total_slots, 10),
+      bookedSlots:        parseInt(row.booked_slots, 10),
+      availableSlots:     parseInt(row.available_slots, 10),
+      fillRate:           parseFloat(row.fill_rate || 0),
+      peakFillRate:       parseFloat(row.peak_fill_rate || 0),
+      nonPeakFillRate:    parseFloat(row.non_peak_fill_rate || 0),
+      totalRevenue:       parseFloat(parseFloat(row.total_revenue).toFixed(2)),
+      avgBookingValue:    parseFloat(parseFloat(row.avg_booking_value).toFixed(2)),
+      totalBookings:      parseInt(row.total_bookings, 10),
+      cancelledBookings:  parseInt(row.cancelled_bookings, 10),
+      cancellationRate:   parseFloat(row.cancellation_rate || 0),
+    }));
+  }
+
+  /**
+   * Demand metrics aggregated by day of week (Monday–Sunday).
+   */
+  async getDayOfWeekAnalytics(filters = {}) {
+    const { where, values } = buildSlotFilters(filters, 's');
+
+    const sql = `
+      SELECT
+        EXTRACT(DOW FROM s.date)                                             AS dow,
+        TRIM(TO_CHAR(s.date, 'Day'))                                         AS day_name,
+        COUNT(s.id)                                                          AS total_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')                       AS booked_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'AVAILABLE')                    AS available_slots,
+        ROUND(COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id), 0) * 100, 2) AS fill_rate,
+        COALESCE(SUM(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS total_revenue
+      FROM slots s
+      LEFT JOIN bookings b ON b.slot_id = s.id
+      ${where}
+      GROUP BY dow, day_name
+      ORDER BY dow
+    `;
+
+    const res = await db.query(sql, values);
+    return res.rows.map(row => ({
+      dayOfWeek:    parseInt(row.dow, 10),
+      dayName:      row.day_name,
+      totalSlots:   parseInt(row.total_slots, 10),
+      bookedSlots:  parseInt(row.booked_slots, 10),
+      availableSlots:parseInt(row.available_slots, 10),
+      fillRate:     parseFloat(row.fill_rate || 0),
+      totalRevenue: parseFloat(parseFloat(row.total_revenue).toFixed(2)),
+    }));
+  }
+
+  /**
+   * Demand metrics aggregated by time buckets and hour of day.
+   */
+  async getTimeAnalytics(filters = {}) {
+    const { where, values } = buildSlotFilters(filters, 's');
+
+    // 1. Hourly breakdown by start_time
+    const hourlySql = `
+      SELECT
+        s.start_time,
+        COUNT(s.id)                                                          AS total_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')                       AS booked_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'AVAILABLE')                    AS available_slots,
+        ROUND(COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id), 0) * 100, 2) AS fill_rate,
+        COALESCE(SUM(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS total_revenue
+      FROM slots s
+      LEFT JOIN bookings b ON b.slot_id = s.id
+      ${where}
+      GROUP BY s.start_time
+      ORDER BY s.start_time
+    `;
+    const hourlyRes = await db.query(hourlySql, values);
+
+    // 2. Standard Time Buckets breakdown
+    const bucketSql = `
+      SELECT
+        CASE
+          WHEN s.start_time >= '08:00:00' AND s.start_time < '12:00:00' THEN '08:00-12:00 (Morning Non-Peak)'
+          WHEN s.start_time >= '12:00:00' AND s.start_time < '16:00:00' THEN '12:00-16:00 (Afternoon Non-Peak)'
+          WHEN s.start_time >= '16:00:00' AND s.start_time < '18:00:00' THEN '16:00-18:00 (Late Afternoon)'
+          WHEN s.start_time >= '18:00:00' AND s.start_time <= '21:00:00' THEN '18:00-21:00 (Evening Peak)'
+          ELSE 'Other'
+        END AS time_bucket,
+        COUNT(s.id)                                                          AS total_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')                       AS booked_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'AVAILABLE')                    AS available_slots,
+        ROUND(COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id), 0) * 100, 2) AS fill_rate,
+        COALESCE(SUM(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS total_revenue
+      FROM slots s
+      LEFT JOIN bookings b ON b.slot_id = s.id
+      ${where}
+      GROUP BY time_bucket
+      ORDER BY MIN(s.start_time)
+    `;
+    const bucketRes = await db.query(bucketSql, values);
+
+    return {
+      timeBuckets: bucketRes.rows.map(row => ({
+        timeBucket:   row.time_bucket,
+        totalSlots:   parseInt(row.total_slots, 10),
+        bookedSlots:  parseInt(row.booked_slots, 10),
+        availableSlots:parseInt(row.available_slots, 10),
+        fillRate:     parseFloat(row.fill_rate || 0),
+        totalRevenue: parseFloat(parseFloat(row.total_revenue).toFixed(2)),
+      })),
+      hourly: hourlyRes.rows.map(row => ({
+        startTime:    row.start_time,
+        totalSlots:   parseInt(row.total_slots, 10),
+        bookedSlots:  parseInt(row.booked_slots, 10),
+        availableSlots:parseInt(row.available_slots, 10),
+        fillRate:     parseFloat(row.fill_rate || 0),
+        totalRevenue: parseFloat(parseFloat(row.total_revenue).toFixed(2)),
+      }))
+    };
+  }
+
+  /**
+   * Historically underutilized off-peak slot patterns ranked by Opportunity Score.
+   */
+  async getOffPeakOpportunities(filters = {}) {
+    const minSlots = Math.max(parseInt(filters.minSlots || 10, 10), 1);
+    const limit    = Math.min(parseInt(filters.limit || 20, 10), 100);
+
+    // Force period = NON_PEAK if not explicitly specified differently
+    const queryFilters = { ...filters };
+    if (!queryFilters.period) {
+      queryFilters.period = 'NON_PEAK';
+    }
+
+    const { where, values, nextIdx } = buildSlotFilters(queryFilters, 's');
+    const paramMinSlots = nextIdx;
+    const paramLimit    = nextIdx + 1;
+    values.push(minSlots, limit);
+
+    const sql = `
+      SELECT
+        a.name                                                               AS arena_name,
+        s.arena_id,
+        s.sport,
+        TRIM(TO_CHAR(s.date, 'Day'))                                         AS day_of_week,
+        EXTRACT(DOW FROM s.date)                                             AS dow,
+        s.start_time,
+        s.period,
+        COUNT(s.id)                                                          AS total_observed_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')                       AS booked_slots,
+        COUNT(s.id) FILTER (WHERE s.status = 'AVAILABLE')                    AS available_slots,
+        ROUND(COUNT(s.id) FILTER (WHERE s.status = 'BOOKED')::numeric / NULLIF(COUNT(s.id), 0), 4) AS historical_fill_rate,
+        COALESCE(SUM(b.final_price) FILTER (WHERE b.status != 'CANCELLED'), 0) AS total_revenue
+      FROM slots s
+      JOIN arenas a ON a.id = s.arena_id
+      LEFT JOIN bookings b ON b.slot_id = s.id
+      ${where}
+      GROUP BY a.name, s.arena_id, s.sport, day_of_week, dow, s.start_time, s.period
+      HAVING COUNT(s.id) >= $${paramMinSlots}
+      ORDER BY historical_fill_rate ASC, total_observed_slots DESC
+      LIMIT $${paramLimit}
+    `;
+
+    const res = await db.query(sql, values);
+
+    return res.rows.map(row => {
+      const totalObserved = parseInt(row.total_observed_slots, 10);
+      const booked        = parseInt(row.booked_slots, 10);
+      const fillRateNum   = parseFloat(row.historical_fill_rate || 0);
+
+      // Opportunity score formula: (1.0 - fillRate) * 100 * min(1.0, totalObserved / 20)
+      const confidenceWeight = Math.min(1.0, totalObserved / 20.0);
+      const opportunityScore = parseFloat(((1.0 - fillRateNum) * 100.0 * confidenceWeight).toFixed(2));
+
+      return {
+        arena:              row.arena_name,
+        arenaId:            row.arena_id,
+        sport:              row.sport,
+        dayOfWeek:          row.day_of_week,
+        dayOfWeekNum:       parseInt(row.dow, 10),
+        time:               row.start_time,
+        period:             row.period,
+        historicalFillRate: parseFloat((fillRateNum * 100).toFixed(2)),
+        historicalFillRateDecimal: fillRateNum,
+        totalObservedSlots: totalObserved,
+        bookedSlots:        booked,
+        availableSlots:     parseInt(row.available_slots, 10),
+        totalRevenue:       parseFloat(parseFloat(row.total_revenue).toFixed(2)),
+        opportunityScore:   opportunityScore,
+      };
+    });
   }
 }
 

@@ -148,6 +148,66 @@ class BookingProvider {
   async getBookingStatistics(filters = {}) {
     throw new Error('BookingProvider.getBookingStatistics() must be implemented.');
   }
+
+  // ------------------------------------------------------------------
+  // Off-Peak Analytics Layer Methods
+  // ------------------------------------------------------------------
+
+  /**
+   * High-level analytics summary for dashboard consumption.
+   * @param {{ arenaId?: number, sport?: string, startDate?: string, endDate?: string }} filters
+   */
+  async getAnalyticsSummary(filters = {}) {
+    throw new Error('BookingProvider.getAnalyticsSummary() must be implemented.');
+  }
+
+  /**
+   * Overall, peak, and non-peak fill rate & utilization details.
+   * @param {{ arenaId?: number, sport?: string, period?: string, startDate?: string, endDate?: string }} filters
+   */
+  async getUtilizationAnalytics(filters = {}) {
+    throw new Error('BookingProvider.getUtilizationAnalytics() must be implemented.');
+  }
+
+  /**
+   * Performance metrics aggregated by sport.
+   * @param {{ arenaId?: number, startDate?: string, endDate?: string }} filters
+   */
+  async getSportAnalytics(filters = {}) {
+    throw new Error('BookingProvider.getSportAnalytics() must be implemented.');
+  }
+
+  /**
+   * Performance metrics aggregated by arena.
+   * @param {{ sport?: string, startDate?: string, endDate?: string }} filters
+   */
+  async getArenaAnalytics(filters = {}) {
+    throw new Error('BookingProvider.getArenaAnalytics() must be implemented.');
+  }
+
+  /**
+   * Demand metrics aggregated by day of week (Monday–Sunday).
+   * @param {{ arenaId?: number, sport?: string, startDate?: string, endDate?: string }} filters
+   */
+  async getDayOfWeekAnalytics(filters = {}) {
+    throw new Error('BookingProvider.getDayOfWeekAnalytics() must be implemented.');
+  }
+
+  /**
+   * Demand metrics aggregated by time buckets and hour of day.
+   * @param {{ arenaId?: number, sport?: string, startDate?: string, endDate?: string }} filters
+   */
+  async getTimeAnalytics(filters = {}) {
+    throw new Error('BookingProvider.getTimeAnalytics() must be implemented.');
+  }
+
+  /**
+   * Historically underutilized off-peak slot patterns ranked by Opportunity Score.
+   * @param {{ arenaId?: number, sport?: string, startDate?: string, endDate?: string, minSlots?: number, limit?: number }} filters
+   */
+  async getOffPeakOpportunities(filters = {}) {
+    throw new Error('BookingProvider.getOffPeakOpportunities() must be implemented.');
+  }
 }
 
 module.exports = BookingProvider;

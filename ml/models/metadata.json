@@ -1,0 +1,39 @@
+{
+  "model_type": "RandomForestClassifier",
+  "n_estimators": 100,
+  "max_depth": 10,
+  "trained_at": "2026-09-05T12:38:39.610921",
+  "train_size": 24729,
+  "test_size": 6183,
+  "feature_cols": [
+    "arena_id",
+    "sport_encoded",
+    "day_of_week",
+    "start_hour",
+    "is_peak",
+    "normal_price",
+    "group_fill_rate"
+  ],
+  "sport_map": {
+    "Football": 0,
+    "Cricket": 1,
+    "Badminton": 2,
+    "Basketball": 3
+  },
+  "metrics": {
+    "accuracy": 0.7467,
+    "precision": 0.6579,
+    "recall": 0.5065,
+    "f1_score": 0.5724,
+    "roc_auc": 0.771
+  },
+  "feature_importances": {
+    "arena_id": 0.014214399117009937,
+    "sport_encoded": 0.009784912533009242,
+    "day_of_week": 0.06799226615359899,
+    "start_hour": 0.22371966457712353,
+    "is_peak": 0.15667679559397515,
+    "normal_price": 0.057737399818958764,
+    "group_fill_rate": 0.46987456220632434
+  }
+}

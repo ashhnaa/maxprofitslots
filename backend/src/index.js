@@ -47,10 +47,23 @@ app.get('/api/db/health', async (req, res) => {
 
 // ─── Booking Data Provider Routes ────────────────────────────────
 // All /api/booking/* routes go through the provider abstraction layer.
-// The actual data source (demo PostgreSQL or external API) is
-// determined by BOOKING_PROVIDER in .env — not hardcoded here.
 const bookingRouter = require('./routes/booking');
 app.use('/api/booking', bookingRouter);
+
+// ─── Off-Peak Analytics Layer Routes ──────────────────────────────
+// All /api/analytics/* routes analyze historical booking data.
+const analyticsRouter = require('./routes/analytics');
+app.use('/api/analytics', analyticsRouter);
+
+// ─── Demand Prediction & Profit Optimization Routes ───────────────
+// POST /api/optimization/evaluate
+const optimizationRouter = require('./routes/optimization');
+app.use('/api/optimization', optimizationRouter);
+
+// ─── AI Profit Optimization Agent Routes ──────────────────────────
+// POST /api/agent/optimize
+const agentRouter = require('./routes/agent');
+app.use('/api/agent', agentRouter);
 
 // ─── 404 catch-all ───────────────────────────────────────────────
 app.use((req, res) => {
@@ -59,8 +72,12 @@ app.use((req, res) => {
 
 // ─── Global error handler ─────────────────────────────────────────
 app.use((err, req, res, _next) => {
-  console.error('[Unhandled Error]', err);
-  res.status(500).json({ status: 'error', message: 'Internal server error.' });
+  console.error('[Unhandled Error]', err.message || err);
+  const status = err.status || 500;
+  res.status(status).json({
+    status: 'error',
+    message: err.message || 'Internal server error.',
+  });
 });
 
 // ─── Start ────────────────────────────────────────────────────────

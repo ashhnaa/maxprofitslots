@@ -5,120 +5,99 @@
  * =======================================
  *
  * This stub represents how a real arena booking system (e.g. Playo,
- * SportzBuddy, PlayAll, or a custom arena ERP) would be integrated.
+ * SportzBuddy, PlayAll, or a custom arena ERP) would integrate with
+ * the Sports Turf Profit Optimizer.
  *
- * To activate this provider:
- *   1. Set BOOKING_PROVIDER=external in backend/.env
- *   2. Set EXTERNAL_BOOKING_API_URL, EXTERNAL_BOOKING_API_KEY, etc.
- *   3. Implement every method below by calling the real external API
- *      and mapping its response to the normalized shapes defined in
- *      BookingProvider.js.
+ * Architectural Principle:
+ * ------------------------
+ * Arena owners DO NOT replace their booking software. Instead, they provide
+ * read/write API credentials (or webhooks). An implementation of
+ * ExternalBookingProvider translates the third-party API payloads into the
+ * standard normalized shapes defined by BookingProvider.
  *
- * ==================================================================
- * REQUIRED EXTERNAL API CONTRACT
- * ==================================================================
- *
- * The external booking system must expose (or be adaptable to) at
- * least the following endpoints/capabilities.  The exact format may
- * differ — that is what this adapter normalizes away.
- *
- *  GET /arenas
- *    → list of arenas with id, name, location
- *
- *  GET /slots?date=YYYY-MM-DD&arenaId=&sport=&status=
- *    → list of slots for a given day
- *
- *  GET /slots/:id
- *    → single slot detail
- *
- *  GET /bookings?slotId=&customerId=&fromDate=&toDate=&status=
- *    → list of bookings (supports date-range filtering for history)
- *
- *  GET /customers/:id
- *    → customer profile
- *
- *  GET /customers/:id/bookings
- *    → booking history for a customer
- *
- * Authentication:
- *   Bearer token / API key passed in Authorization header.
- *   Configure via EXTERNAL_BOOKING_API_KEY in .env.
- *
- * Rate limits:
- *   Implement caching (Redis / in-memory) here if the external API
- *   enforces rate limits.  The rest of the application should be
- *   unaware of this caching.
- *
- * Webhook / push vs polling:
- *   If the external system pushes booking events via webhook, handle
- *   the webhook in a separate route and update a local cache here.
- *
- * ==================================================================
- * DATA MAPPING EXAMPLE
- * ==================================================================
- *
- * External API response:
- *   {
- *     "slot_id": "abc-123",
- *     "court":   "Football Ground A",
- *     "time_from": "2026-09-10T17:00:00",
- *     "time_to":   "2026-09-10T18:00:00",
- *     "rate": 1200,
- *     "booking_status": "open"
- *   }
- *
- * Normalized Slot (what the rest of our app sees):
- *   {
- *     id:              "abc-123",
- *     arenaId:         1,
- *     sport:           "Football",
- *     date:            "2026-09-10",
- *     startTime:       "17:00:00",
- *     endTime:         "18:00:00",
- *     durationMinutes: 60,
- *     normalPrice:     1200,
- *     period:          "PEAK",
- *     status:          "AVAILABLE"
- *   }
- *
- * ==================================================================
+ * How to activate in production:
+ * ------------------------------
+ *  1. Implement the HTTP client calls inside the methods below.
+ *  2. Map external JSON fields → BookingProvider camelCase objects.
+ *  3. Set `BOOKING_PROVIDER=external` in `backend/.env`.
  */
 
 const BookingProvider = require('./BookingProvider');
 
 class ExternalBookingProvider extends BookingProvider {
-
-  constructor() {
+  constructor(apiConfig = {}) {
     super();
-    this.apiUrl = process.env.EXTERNAL_BOOKING_API_URL;
-    this.apiKey = process.env.EXTERNAL_BOOKING_API_KEY;
-
-    if (!this.apiUrl) {
-      console.warn(
-        '[ExternalBookingProvider] EXTERNAL_BOOKING_API_URL is not set. ' +
-        'All calls will throw NotImplementedError until configured.'
-      );
-    }
+    this.baseUrl = apiConfig.baseUrl || process.env.EXTERNAL_BOOKING_API_URL;
+    this.apiKey  = apiConfig.apiKey  || process.env.EXTERNAL_BOOKING_API_KEY;
   }
 
-  _notImplemented(method) {
-    throw new Error(
-      `ExternalBookingProvider.${method}() is not yet implemented. ` +
-      'Set BOOKING_PROVIDER=demo to use the PostgreSQL demo provider, ' +
-      'or implement this method to connect to your booking API.'
-    );
+  async getArenas() {
+    throw new Error('ExternalBookingProvider.getArenas() not connected to live external API.');
   }
 
-  async getArenas()                              { this._notImplemented('getArenas'); }
-  async getAvailableSlots(filters)               { this._notImplemented('getAvailableSlots'); }
-  async getSlotById(slotId)                      { this._notImplemented('getSlotById'); }
-  async getSlotsByDate(date, filters)            { this._notImplemented('getSlotsByDate'); }
-  async getBookingsForSlot(slotId)               { this._notImplemented('getBookingsForSlot'); }
-  async getHistoricalBookings(filters)           { this._notImplemented('getHistoricalBookings'); }
-  async getCustomers(options)                    { this._notImplemented('getCustomers'); }
-  async getCustomerById(customerId)              { this._notImplemented('getCustomerById'); }
-  async getCustomerBookingHistory(customerId, o) { this._notImplemented('getCustomerBookingHistory'); }
-  async getBookingStatistics(filters)            { this._notImplemented('getBookingStatistics'); }
+  async getAvailableSlots(filters = {}) {
+    throw new Error('ExternalBookingProvider.getAvailableSlots() not connected to live external API.');
+  }
+
+  async getSlotById(slotId) {
+    throw new Error('ExternalBookingProvider.getSlotById() not connected to live external API.');
+  }
+
+  async getSlotsByDate(date, filters = {}) {
+    throw new Error('ExternalBookingProvider.getSlotsByDate() not connected to live external API.');
+  }
+
+  async getBookingsForSlot(slotId) {
+    throw new Error('ExternalBookingProvider.getBookingsForSlot() not connected to live external API.');
+  }
+
+  async getHistoricalBookings(filters = {}) {
+    throw new Error('ExternalBookingProvider.getHistoricalBookings() not connected to live external API.');
+  }
+
+  async getCustomers(options = {}) {
+    throw new Error('ExternalBookingProvider.getCustomers() not connected to live external API.');
+  }
+
+  async getCustomerById(customerId) {
+    throw new Error('ExternalBookingProvider.getCustomerById() not connected to live external API.');
+  }
+
+  async getCustomerBookingHistory(customerId, options = {}) {
+    throw new Error('ExternalBookingProvider.getCustomerBookingHistory() not connected to live external API.');
+  }
+
+  async getBookingStatistics(filters = {}) {
+    throw new Error('ExternalBookingProvider.getBookingStatistics() not connected to live external API.');
+  }
+
+  async getAnalyticsSummary(filters = {}) {
+    throw new Error('ExternalBookingProvider.getAnalyticsSummary() not connected to live external API.');
+  }
+
+  async getUtilizationAnalytics(filters = {}) {
+    throw new Error('ExternalBookingProvider.getUtilizationAnalytics() not connected to live external API.');
+  }
+
+  async getSportAnalytics(filters = {}) {
+    throw new Error('ExternalBookingProvider.getSportAnalytics() not connected to live external API.');
+  }
+
+  async getArenaAnalytics(filters = {}) {
+    throw new Error('ExternalBookingProvider.getArenaAnalytics() not connected to live external API.');
+  }
+
+  async getDayOfWeekAnalytics(filters = {}) {
+    throw new Error('ExternalBookingProvider.getDayOfWeekAnalytics() not connected to live external API.');
+  }
+
+  async getTimeAnalytics(filters = {}) {
+    throw new Error('ExternalBookingProvider.getTimeAnalytics() not connected to live external API.');
+  }
+
+  async getOffPeakOpportunities(filters = {}) {
+    throw new Error('ExternalBookingProvider.getOffPeakOpportunities() not connected to live external API.');
+  }
 }
 
 module.exports = ExternalBookingProvider;
