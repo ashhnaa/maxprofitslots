@@ -6,7 +6,7 @@
  *
  * Orchestrates the end-to-end profit optimization workflow:
  *
- *   OBSERVE → ANALYZE HISTORY → PREDICT → RETRIEVE RULES → EVALUATE → OPTIMIZE → EXPLAIN → RECOMMEND → TARGET CUSTOMERS (IF NOTIFICATION)
+ *   OBSERVE → ANALYZE HISTORY → PREDICT → RETRIEVE RULES → VALIDATE ACTIONS → EVALUATE → OPTIMIZE → EXPLAIN → RECOMMEND → TARGET CUSTOMERS
  *
  * Guarantees zero direct SQL access by routing all slot operations, history,
  * predictions, and policy checks through standardized tool interfaces.
@@ -22,7 +22,7 @@ class ProfitOptimizationAgent {
    * Run the profit optimization agent workflow for a given slot.
    *
    * @param {number} slotId
-   * @returns {Promise<Object>} Agent decision payload with transparent trace log
+   * @returns {Promise<Object>} Agent decision payload with transparent trace log and grounding metadata
    */
   async runOptimization(slotId) {
     const trace = [];
@@ -50,26 +50,35 @@ class ProfitOptimizationAgent {
     const bookingProbability = await agentTools.getNaturalDemandPrediction(slot, historicalFillRate);
     trace.push(`Predicted natural booking probability P(natural | do_nothing) = ${(bookingProbability * 100).toFixed(1)}%`);
 
-    // STEP 4 — RETRIEVE BUSINESS RULES
-    trace.push(`STEP 4 (RETRIEVE RULES): Querying grounded business rules for Arena ID ${slot.arenaId}`);
-    const rules = await agentTools.getArenaRules(slot.arenaId);
-    trace.push(`Retrieved arena rules (Max discount: ${rules.maxDiscountPercentage}%, Peak discount allowed: ${rules.allowPeakDiscounts}, Notification cost: ₹${rules.notificationCost})`);
+    // STEP 4 — RETRIEVE GROUNDED ARENA BUSINESS RULES
+    trace.push(`STEP 4 (RETRIEVE RULES): Querying grounded business policy knowledge for Arena ID ${slot.arenaId}`);
+    const rules = await agentTools.getArenaRules(slot);
+    trace.push(`Retrieved policy from '${rules.policySource}' (Max discount: ${rules.maxDiscountPercentage}%, Peak discounts: ${rules.allowPeakDiscounts}, Weekend discounts: ${rules.allowWeekendDiscounts}, Notification cost: ₹${rules.notificationCost})`);
 
-    // STEP 5 — EVALUATE ACTIONS
-    trace.push('STEP 5 (EVALUATE ACTIONS): Computing expected revenue and net profit across candidate actions under rules');
+    // STEP 5 — VALIDATE ACTIONS & EVALUATE REVENUE/PROFIT
+    trace.push('STEP 5 (VALIDATE & EVALUATE): Validating candidate actions against grounded policy rules & computing expected net profit');
     const actionEvaluations = agentTools.evaluateActions(slot, rules, bookingProbability);
     actionEvaluations.forEach(a => {
       if (a.isValid) {
         trace.push(`Evaluated [${a.action}]: P(book)=${(a.bookingProbability * 100).toFixed(1)}%, Final Price=₹${a.finalPrice}, Cost=₹${a.actionCost} -> Exp Revenue=₹${a.expectedRevenue}, Exp Profit=₹${a.expectedProfit}`);
       } else {
-        trace.push(`Evaluated [${a.action}]: INVALID (${a.invalidationReason})`);
+        trace.push(`Evaluated [${a.action}]: REJECTED BY POLICY (${a.invalidationReason})`);
       }
     });
+
+    const rejectedActions = actionEvaluations
+      .filter(a => !a.isValid)
+      .map(a => ({
+        action: a.action,
+        label: a.label,
+        reason: a.invalidationReason,
+        violatingPolicy: a.violatingPolicy || 'Arena Business Policy',
+      }));
 
     // STEP 6 — OPTIMIZE PROFIT
     trace.push('STEP 6 (OPTIMIZE PROFIT): Selecting valid action with MAXIMUM EXPECTED PROFIT');
     const bestAction = agentTools.selectBestAction(actionEvaluations);
-    trace.push(`Selected profit-maximizing action: '${bestAction.action}' (Expected Profit: ₹${bestAction.expectedProfit})`);
+    trace.push(`Selected profit-maximizing valid action: '${bestAction.action}' (Expected Profit: ₹${bestAction.expectedProfit})`);
 
     // STEP 7 — DECISION EXPLANATION
     trace.push('STEP 7 (EXPLAIN): Generating deterministic financial decision explanation');
@@ -94,6 +103,7 @@ class ProfitOptimizationAgent {
       label: a.label,
       isValid: a.isValid,
       invalidationReason: a.invalidationReason || null,
+      violatingPolicy: a.violatingPolicy || null,
       bookingProbability: a.bookingProbability,
       discountPercentage: a.discountPercentage,
       finalPrice: a.finalPrice,
@@ -120,11 +130,21 @@ class ProfitOptimizationAgent {
         bookingProbability,
         rules: {
           arenaId: rules.arenaId,
+          arenaName: rules.arenaName,
           maxDiscountPercentage: rules.maxDiscountPercentage,
           allowPeakDiscounts: rules.allowPeakDiscounts,
+          allowWeekendDiscounts: rules.allowWeekendDiscounts,
           notificationCost: rules.notificationCost,
+          minimumFinalPrice: rules.minimumFinalPrice,
           isGroundedPolicy: rules.isGroundedPolicy,
           policySource: rules.policySource,
+        },
+        grounding: {
+          isGroundedPolicy: rules.isGroundedPolicy,
+          policySource: rules.policySource,
+          sourceDocuments: rules.sourceDocuments || [rules.policySource],
+          rulesUsed: rules.rulesUsed || [],
+          rejectedActions,
         },
         actions: formattedActions,
         recommendedAction: bestAction.action,

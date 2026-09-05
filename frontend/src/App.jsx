@@ -4,6 +4,7 @@ import FilterBar from './components/FilterBar';
 import SummaryCards from './components/SummaryCards';
 import OpportunityList from './components/OpportunityList';
 import OptimizationPanel from './components/OptimizationPanel';
+import GroundedRules from './components/GroundedRules';
 import TargetCustomers from './components/TargetCustomers';
 import ActionComparison from './components/ActionComparison';
 import DecisionTrace from './components/DecisionTrace';
@@ -116,6 +117,8 @@ function App() {
   const actionsList = optimizationResult?.actions || optimizationResult?.action_evaluations;
   const agentTrace = optimizationResult?.trace || optimizationResult?.agent_trace;
   const targetCustomers = optimizationResult?.targetCustomers || [];
+  const grounding = optimizationResult?.grounding;
+  const rules = optimizationResult?.rules;
 
   return (
     <div className="app-container dark-theme">
@@ -161,15 +164,22 @@ function App() {
 
             {optimizationResult && (
               <>
+                <GroundedRules
+                  grounding={grounding}
+                  rules={rules}
+                />
+
                 <TargetCustomers
                   slot={selectedSlot}
                   customers={targetCustomers}
                   recommendedAction={recommendedAction}
                 />
+
                 <ActionComparison
                   actions={actionsList}
                   recommendedAction={recommendedAction}
                 />
+
                 <DecisionTrace
                   trace={agentTrace}
                 />

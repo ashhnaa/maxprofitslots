@@ -5,12 +5,12 @@
  * ===================================
  *
  * Provides clean function tools called by the Profit Optimization Agent.
- * Each tool wraps existing underlying services rather than duplicating logic.
+ * Each tool wraps underlying services and grounded policy knowledge.
  */
 
 const provider = require('../../config/providerConfig');
 const { predictBookingProbability } = require('../predictionService');
-const { getRules } = require('./ruleRetriever');
+const { getRelevantRules } = require('./ruleRetriever');
 const actionConfig = require('../../config/actionConfig');
 
 /**
@@ -75,37 +75,51 @@ async function getNaturalDemandPrediction(slot, historicalFillRate) {
 /**
  * Tool 4: Retrieve grounded business rules for an arena.
  */
-async function getArenaRules(arenaId) {
-  return await getRules(arenaId);
+async function getArenaRules(slot) {
+  const arenaId = typeof slot === 'object' ? slot.arenaId : slot;
+  return await getRelevantRules({ arenaId, slot: typeof slot === 'object' ? slot : null });
 }
 
 /**
- * Tool 5: Evaluate revenue and expected profit under candidate actions against business rules.
+ * Tool 5: Evaluate revenue and expected profit under candidate actions against grounded business rules.
  */
 function evaluateActions(slot, rules, baseProbability) {
   const evaluations = [];
+  const slotDate = slot.date ? new Date(slot.date) : null;
+  const isWeekend = slotDate ? (slotDate.getDay() === 0 || slotDate.getDay() === 6) : false;
 
   for (const [actionKey, actionSpec] of Object.entries(actionConfig.actions)) {
     let isValid = true;
     let invalidationReason = null;
+    let violatingPolicy = null;
 
     // Rule Check 1: Peak discount prohibition
-    if (slot.period === 'PEAK' && !actionSpec.allowedInPeak) {
+    if (slot.period === 'PEAK' && !actionSpec.allowedInPeak && actionSpec.discountPercentage > 0) {
       isValid = false;
-      invalidationReason = 'Discounts are prohibited during PEAK hours under arena policy.';
+      violatingPolicy = 'Peak-Hour Restrictions';
+      invalidationReason = `Discounts prohibited during PEAK hours (Source: ${rules.policySource} - ${violatingPolicy})`;
     }
 
-    // Rule Check 2: Max discount cap
-    if (actionSpec.discountPercentage > rules.maxDiscountPercentage) {
+    // Rule Check 2: Weekend discount prohibition
+    if (isValid && isWeekend && rules.allowWeekendDiscounts === false && actionSpec.discountPercentage > 0) {
       isValid = false;
-      invalidationReason = `Discount (${actionSpec.discountPercentage}%) exceeds arena maximum threshold of ${rules.maxDiscountPercentage}%.`;
+      violatingPolicy = 'Weekend Restrictions';
+      invalidationReason = `Discounts prohibited on weekends (Source: ${rules.policySource} - ${violatingPolicy})`;
     }
 
-    // Rule Check 3: Non-negative final price
+    // Rule Check 3: Max discount cap
+    if (isValid && actionSpec.discountPercentage > rules.maxDiscountPercentage) {
+      isValid = false;
+      violatingPolicy = 'Discount Policy';
+      invalidationReason = `Discount (${actionSpec.discountPercentage}%) exceeds arena maximum threshold of ${rules.maxDiscountPercentage}% (Source: ${rules.policySource} - ${violatingPolicy})`;
+    }
+
+    // Rule Check 4: Price floor check
     const finalPrice = Math.max(0, parseFloat((slot.normalPrice * (1.0 - (actionSpec.discountPercentage / 100.0))).toFixed(2)));
-    if (finalPrice < 0) {
+    if (isValid && rules.minimumFinalPrice > 0 && finalPrice < rules.minimumFinalPrice && actionSpec.discountPercentage > 0) {
       isValid = false;
-      invalidationReason = 'Final price cannot be negative.';
+      violatingPolicy = 'Discount Policy';
+      invalidationReason = `Final price ₹${finalPrice} is below arena price floor of ₹${rules.minimumFinalPrice} (Source: ${rules.policySource} - ${violatingPolicy})`;
     }
 
     if (!isValid) {
@@ -114,6 +128,7 @@ function evaluateActions(slot, rules, baseProbability) {
         label: actionSpec.label,
         isValid: false,
         invalidationReason,
+        violatingPolicy,
         bookingProbability: 0,
         discountPercentage: actionSpec.discountPercentage,
         finalPrice,
@@ -154,7 +169,7 @@ function evaluateActions(slot, rules, baseProbability) {
 function selectBestAction(evaluations) {
   const validActions = evaluations.filter(a => a.isValid);
   if (!validActions.length) {
-    throw new Error('No valid actions available for evaluation.');
+    throw new Error('No valid actions available for evaluation after applying grounded business rules.');
   }
   validActions.sort((a, b) => b.expectedProfit - a.expectedProfit);
   return validActions[0];
