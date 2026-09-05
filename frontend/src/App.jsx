@@ -4,6 +4,7 @@ import FilterBar from './components/FilterBar';
 import SummaryCards from './components/SummaryCards';
 import OpportunityList from './components/OpportunityList';
 import OptimizationPanel from './components/OptimizationPanel';
+import TargetCustomers from './components/TargetCustomers';
 import ActionComparison from './components/ActionComparison';
 import DecisionTrace from './components/DecisionTrace';
 import AnalyticsCharts from './components/AnalyticsCharts';
@@ -96,11 +97,12 @@ function App() {
 
   // Handle Opportunity Selection & Run AI Agent Optimization
   const handleSelectOpportunity = async (opp) => {
-    setSelectedSlot(opp);
+    const slotId = opp.slot_id || opp.slotId || opp.id || 1;
+    setSelectedSlot({ ...opp, slot_id: slotId });
     setAnalyzingSlot(true);
     setOptimizationResult(null);
     try {
-      const result = await optimizeSlot(opp.slot_id);
+      const result = await optimizeSlot(slotId);
       setOptimizationResult(result);
     } catch (err) {
       console.error('Failed to optimize slot:', err);
@@ -109,6 +111,11 @@ function App() {
       setAnalyzingSlot(false);
     }
   };
+
+  const recommendedAction = optimizationResult?.recommendedAction || optimizationResult?.recommended_action;
+  const actionsList = optimizationResult?.actions || optimizationResult?.action_evaluations;
+  const agentTrace = optimizationResult?.trace || optimizationResult?.agent_trace;
+  const targetCustomers = optimizationResult?.targetCustomers || [];
 
   return (
     <div className="app-container dark-theme">
@@ -154,12 +161,17 @@ function App() {
 
             {optimizationResult && (
               <>
+                <TargetCustomers
+                  slot={selectedSlot}
+                  customers={targetCustomers}
+                  recommendedAction={recommendedAction}
+                />
                 <ActionComparison
-                  actions={optimizationResult.action_evaluations}
-                  recommendedAction={optimizationResult.recommended_action}
+                  actions={actionsList}
+                  recommendedAction={recommendedAction}
                 />
                 <DecisionTrace
-                  trace={optimizationResult.agent_trace}
+                  trace={agentTrace}
                 />
               </>
             )}

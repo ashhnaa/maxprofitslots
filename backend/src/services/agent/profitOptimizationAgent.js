@@ -6,7 +6,7 @@
  *
  * Orchestrates the end-to-end profit optimization workflow:
  *
- *   OBSERVE → ANALYZE HISTORY → PREDICT → RETRIEVE RULES → EVALUATE → OPTIMIZE → EXPLAIN → RECOMMEND
+ *   OBSERVE → ANALYZE HISTORY → PREDICT → RETRIEVE RULES → EVALUATE → OPTIMIZE → EXPLAIN → RECOMMEND → TARGET CUSTOMERS (IF NOTIFICATION)
  *
  * Guarantees zero direct SQL access by routing all slot operations, history,
  * predictions, and policy checks through standardized tool interfaces.
@@ -14,6 +14,7 @@
 
 const agentTools = require('./agentTools');
 const { generateExplanation } = require('./decisionExplainer');
+const customerTargetingService = require('../customerTargetingService');
 
 class ProfitOptimizationAgent {
 
@@ -74,8 +75,19 @@ class ProfitOptimizationAgent {
     trace.push('STEP 7 (EXPLAIN): Generating deterministic financial decision explanation');
     const reason = generateExplanation(bestAction, actionEvaluations, bookingProbability, historicalFillRate, slot);
 
-    // STEP 8 — RETURN RECOMMENDATION & TRACE
-    trace.push(`STEP 8 (RECOMMEND): Agent decision complete for slot #${slot.id}`);
+    // STEP 8 — CUSTOMER TARGETING (ONLY IF TARGETED_NOTIFICATION)
+    let targetCustomers = [];
+    if (bestAction.action === 'TARGETED_NOTIFICATION') {
+      trace.push('STEP 8 (TARGET CUSTOMERS): Action is TARGETED_NOTIFICATION. Invoking Customer Targeting Engine for top relevant customers');
+      const targetingResult = await customerTargetingService.getTargetCustomers(slot.id);
+      targetCustomers = targetingResult.customers;
+      trace.push(`Identified ${targetCustomers.length} top target customer(s) based on historical sport, arena, and time preferences`);
+    } else {
+      trace.push(`STEP 8 (CUSTOMER TARGETING): Action is '${bestAction.action}'. Customer targeting skipped to optimize marketing cost.`);
+    }
+
+    // STEP 9 — RETURN RECOMMENDATION & TRACE
+    trace.push(`STEP 9 (RECOMMEND): Agent decision complete for slot #${slot.id}`);
 
     const formattedActions = actionEvaluations.map(a => ({
       action: a.action,
@@ -121,6 +133,7 @@ class ProfitOptimizationAgent {
         expectedProfit: bestAction.expectedProfit,
         actionCost: bestAction.actionCost,
         reason,
+        targetCustomers,
         trace,
       },
     };

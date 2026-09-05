@@ -1,7 +1,7 @@
 /**
  * api.js — Frontend API client service
  *
- * Calls Express backend APIs (/api/analytics/*, /api/agent/optimize, /api/booking/*).
+ * Calls Express backend APIs (/api/analytics/*, /api/agent/optimize, /api/customers/*, /api/booking/*).
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
@@ -80,6 +80,17 @@ export async function optimizeSlot(slotId) {
   return request('/api/agent/optimize', {
     method: 'POST',
     body: JSON.stringify({ slotId: Number(slotId) }),
+  });
+}
+
+export async function fetchTargetCustomers(slotId, limit = 10) {
+  return request(`/api/customers/targeting/${slotId}?limit=${limit}`);
+}
+
+export async function simulateNotification(slotId, customerIds = []) {
+  return request('/api/customers/simulate-notification', {
+    method: 'POST',
+    body: JSON.stringify({ slotId: Number(slotId), customerIds }),
   });
 }
 

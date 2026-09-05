@@ -65,6 +65,11 @@ app.use('/api/optimization', optimizationRouter);
 const agentRouter = require('./routes/agent');
 app.use('/api/agent', agentRouter);
 
+// ─── Customer Targeting & Simulation Routes ───────────────────────
+// GET /api/customers/targeting/:slotId, POST /api/customers/simulate-notification
+const customerRouter = require('./routes/customers');
+app.use('/api/customers', customerRouter);
+
 // ─── 404 catch-all ───────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ status: 'error', message: `Route ${req.path} not found.` });

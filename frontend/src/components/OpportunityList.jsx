@@ -62,25 +62,33 @@ export default function OpportunityList({
 
       <div className="opp-scroll-container">
         {opportunities.map((opp, idx) => {
-          const isSelected = selectedSlotId === opp.slot_id;
-          const fillRatePct = Math.round(parseFloat(opp.historical_fill_rate || 0) * 100);
-          const score = (parseFloat(opp.opportunity_score || 0) * 100).toFixed(0);
-          const dayName = opp.day_of_week !== undefined ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][opp.day_of_week] : 'Off-Peak';
+          const resolvedSlotId = opp.slot_id || opp.slotId || opp.id || (idx + 1);
+          const isSelected = selectedSlotId === resolvedSlotId;
+          const fillRatePct = Math.round(parseFloat(opp.historical_fill_rate || opp.historicalFillRate || 0) * 100);
+          const score = (parseFloat(opp.opportunity_score || opp.opportunityScore || 0) * 100).toFixed(0);
+          const dayName = opp.day_of_week !== undefined 
+            ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][opp.day_of_week] 
+            : (opp.dayOfWeek || 'Off-Peak');
+
+          const normalizedOpp = {
+            ...opp,
+            slot_id: resolvedSlotId,
+          };
 
           return (
             <div
-              key={opp.slot_id || idx}
+              key={resolvedSlotId || idx}
               className={`opp-item ${isSelected ? 'selected' : ''}`}
-              onClick={() => onSelectOpportunity(opp)}
+              onClick={() => onSelectOpportunity(normalizedOpp)}
             >
               <div className="opp-main-info">
                 <div className="opp-arena-row">
-                  <span className="opp-arena-name">{opp.arena_name || `Arena #${opp.arena_id}`}</span>
-                  <span className="opp-sport-badge">{opp.sport_type || 'Football'}</span>
+                  <span className="opp-arena-name">{opp.arena_name || opp.arena || `Arena #${opp.arena_id || opp.arenaId || 1}`}</span>
+                  <span className="opp-sport-badge">{opp.sport_type || opp.sport || 'Football'}</span>
                 </div>
 
                 <div className="opp-time-row">
-                  <span><Clock size={12} inline="true" /> {dayName} &bull; {opp.start_time ? opp.start_time.substring(0, 5) : '14:00'} - {opp.end_time ? opp.end_time.substring(0, 5) : '15:00'}</span>
+                  <span><Clock size={12} inline="true" /> {dayName} &bull; {opp.start_time || opp.time || '14:00'}</span>
                 </div>
 
                 <div className="opp-stats-row">
@@ -94,12 +102,12 @@ export default function OpportunityList({
               </div>
 
               <div className="opp-right-actions">
-                <span className="opp-price-tag">{formatCurrency(opp.base_price || 1200)}</span>
+                <span className="opp-price-tag">{formatCurrency(opp.base_price || opp.normalPrice || 1200)}</span>
                 <button
                   className={`btn-analyze-ai ${isSelected ? 'active' : ''}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onSelectOpportunity(opp);
+                    onSelectOpportunity(normalizedOpp);
                   }}
                 >
                   <Sparkles size={13} style={{ marginRight: '4px' }} />
